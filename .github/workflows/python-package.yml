@@ -14,23 +14,122 @@ jobs:
   build_check:
 
     runs-on: ubuntu-latest
+    env:
+      BLENDER_VERSION: 2.92
+      PYTHON_VERSION: 3.7
 
     steps:
     - uses: actions/checkout@v2
     - name: Set up Python
       uses: actions/setup-python@v2
       with:
-        python-version: '3.x'
-    - name: Install dependencies
+        python-version: '${{ env.PYTHON_VERSION }}'
+    
+    - name: Add conda to system path
       run: |
-        python -m pip install --upgrade pip
-        pip install setuptools wheel twine
+        # $CONDA is an environment variable pointing to the root of the miniconda directory
+        echo $CONDA/bin >> $GITHUB_PATH
+
+    - name: Install conda dependencies
+      run: |
+        conda update -n base -c defaults conda
+        conda env update --file environment.yml --name base
+        conda install setuptools wheel twine
+    
     - name: Build and check
-      env:
-        TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
-        TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
       run: |
         python setup.py sdist bdist_wheel
         twine check dist/*
+
     - name: REUSE Compliance Check
       uses: fsfe/reuse-action@v1.1
+      
+    - name: Cache compiled dependencies
+      id: cache
+      uses: actions/cache@v2.1.4
+      with:
+        # A list of files, directories, and wildcard patterns to cache and restore
+        path: |
+          software/star_cats/build_star_cats
+          software/openMVG/build_openMVG
+          software/openMVS/build_openMVS
+          /usr/share/miniconda/lib/python${{ env.PYTHON_VERSION }}/site-packages/${{ env.BLENDER_VERSION }}
+          /usr/share/miniconda/lib/python${{ env.PYTHON_VERSION }}/site-packages/bpy.so
+        # An explicit key for restoring and saving the cache
+        key: compiled-deps
+
+    - name: Build star_cats
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        cd software
+        git clone --depth 1 https://github.com/Bill-Gray/star_cats.git
+        cd star_cats
+        [[ -d build_star_cats ]] || mkdir build_star_cats
+        make all
+        cp u4test build_star_cats/
+        cd ../..
+
+    - name: Build bpy
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        sudo apt update
+        sudo apt install -y build-essential git subversion cmake libx11-dev libxxf86vm-dev libxcursor-dev libxi-dev libxrandr-dev libxinerama-dev libglew-dev
+        cd software
+        mkdir blender && cd blender
+        git clone  --depth 1 --recursive --branch v$BLENDER_VERSION.0 https://git.blender.org/blender.git
+        mkdir lib && cd lib
+        svn checkout https://svn.blender.org/svnroot/bf-blender/tags/blender-$BLENDER_VERSION-release/lib/linux_centos7_x86_64/
+        cd ..
+        cd blender
+        make bpy
+        cd ../build_linux_bpy
+        make install
+        echo "Successful compilation"
+        cp ../lib/linux_centos7_x86_64/python/lib/python$PYTHON_VERSION/site-packages/bpy.so /usr/share/miniconda/lib/python$PYTHON_VERSION/site-packages/
+        cp -r ../lib/linux_centos7_x86_64/python/lib/python$PYTHON_VERSION/site-packages/$BLENDER_VERSION /usr/share/miniconda/lib/python$PYTHON_VERSION/site-packages/
+        echo "Successful copying"
+        python -c "import bpy; bpy.ops.wm.save_as_mainfile(filepath='./my.blend')"
+        cd ../..
+
+    - name: Build openMVG
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        sudo apt update
+        sudo apt install -y build-essential cmake libpng-dev libjpeg8-dev libtiff-dev libxxf86vm1 libxxf86vm-dev x11proto-xf86vidmode-dev libxrandr-dev
+        cd software
+        mkdir openMVG && cd openMVG
+        [[ -d build_openMVG ]] || mkdir build_openMVG
+        git clone --depth 1 --recursive https://github.com/openMVG/openMVG.git
+        cd build_openMVG
+        cmake -DCMAKE_BUILD_TYPE=release -DCMAKE_INSTALL_PREFIX=install . ../openMVG/src
+        cmake --build . --target install
+        cd ../..
+
+    - name: Build openMVS
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        sudo apt update
+        sudo apt install -y build-essential cmake libpng-dev libjpeg-dev libtiff-dev libglu1-mesa-dev libboost-iostreams-dev libboost-program-options-dev libboost-system-dev libboost-serialization-dev libopencv-dev libcgal-dev libcgal-qt5-dev
+        cd software
+        mkdir openMVS && cd openMVS
+        git clone --depth 1 --branch 3.2 https://gitlab.com/libeigen/eigen.git
+        mkdir eigen_build && cd eigen_build
+        cmake . ../eigen
+        make && sudo make install
+        cd ..
+        git clone --depth 1 https://github.com/cdcseacave/VCG.git vcglib
+        git clone --depth 1 https://github.com/cdcseacave/openMVS.git openMVS
+        mkdir openMVS_build && cd openMVS_build
+        cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=install -DVCG_ROOT="../vcglib" . ../openMVS
+        cmake --build . --target install
+        cd ../..
+    
+    - name: Test sispo
+      run: |
+        mkdir data/UCAC4
+        python -c "import sispo"
+        echo "Import successful"
+        python -c "import sispo; sispo.run()"
+    - name: sispo unittests
+      run: |
+        python test_basics.py

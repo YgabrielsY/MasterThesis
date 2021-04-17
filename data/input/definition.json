@@ -1,7 +1,7 @@
 {
     "name": "default",
     "res_dir": "data/results/default",
-    "options": ["--with-sim", "--with-render"],
+    "options": ["--with-sim"],
     "plugins": ["/app/JetCreator/interface.py"],
     "orekit_path": "/app/sispo/sispo/sim/orekit-data.zip",
     "simulation":

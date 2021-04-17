@@ -278,7 +278,7 @@ def main():
         log_handlers.append(term_logger)
 
     # Force logging reset to ensure correct style
-    logging.basicConfig(handlers=log_handlers, level=logging.DEBUG, force=True,
+    logging.basicConfig(handlers=log_handlers, level=logging.DEBUG,
                         format="%(asctime)s - %(name)s - %(funcName)s - %(message)s")
 
     logger.debug("\n\n################### NEW SISPO LOG ###################\n")
